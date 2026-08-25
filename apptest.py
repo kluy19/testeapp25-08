@@ -1,10 +1,22 @@
 import sqlite3
 from datetime import date, datetime
+import extra_streamlit_components as stx
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Controle de Gastos Leve", page_icon="💳")
 
+# --- CONFIGURAÇÃO DE SEGURANÇA E COOKIE ---
+SENHA_CORRETA = "suasenha123"  # Mude para a sua senha desejada
+
+
+def get_cookie_manager():
+  return stx.CookieManager()
+
+
+cookie_manager = get_cookie_manager()
+
+# --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS ---
 conn = sqlite3.connect("gastos.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -28,189 +40,280 @@ CREATE TABLE IF NOT EXISTS transacoes (
 """)
 conn.commit()
 
+
+# --- SISTEMA DE LOGIN COM PERSISTÊNCIA ---
+def autenticar():
+  auth_cookie = cookie_manager.get(cookie="auth_gastos_app")
+
+  if "autenticado" not in st.session_state:
+    if auth_cookie == "autenticado_ok":
+      st.session_state["autenticado"] = True
+    else:
+      st.session_state["autenticado"] = False
+
+  if not st.session_state["autenticado"]:
+    st.title("🔒 Acesso Restrito")
+    senha_input = st.text_input(
+        "Digite a senha para acessar:", type="password"
+    )
+    if st.button("Entrar"):
+      if senha_input == SENHA_CORRETA:
+        st.session_state["autenticado"] = True
+        cookie_manager.set(
+            "auth_gastos_app",
+            "autenticado_ok",
+            expires_at=datetime(2030, 1, 1),
+        )
+        st.success("Login efetuado! Recarregando...")
+        st.rerun()
+      else:
+        st.error("Senha incorreta!")
+    return False
+  return True
+
+
+if not autenticar():
+  st.stop()
+
+# --- APLICAÇÃO PRINCIPAL ---
 st.title("💳 Registro Rápido de Gastos")
 
-aba1, aba2, aba3 = st.tabs(
-    ["📝 Registrar Gasto", "📅 Resumo Mensal", "🏦 Gerenciar Bancos"]
-)
+aba1, aba2, aba3, aba4 = st.tabs([
+    "📝 Registrar Gasto",
+    "📅 Resumo Mensal",
+    "🗑️ Gerenciar/Apagar Gastos",
+    "🏦 Bancos",
+])
 
-# --- ABA 3: GERENCIAR BANCOS ---
-with aba3:
-    st.subheader("Cadastrar Novo Banco/Cartão")
-    novo_banco = st.text_input("Nome do Banco ou Cartão").strip()
-    if st.button("Adicionar Banco"):
-        if novo_banco:
-            try:
-                cursor.execute(
-                    "INSERT INTO bancos (nome) VALUES (?)", (novo_banco,)
-                )
-                conn.commit()
-                st.success(f"Banco '{novo_banco}' adicionado com sucesso!")
-            except sqlite3.IntegrityError:
-                st.warning("Este banco já está cadastrado.")
-        else:
-            st.error("Informe um nome válido.")
+# --- ABA: GERENCIAR BANCOS ---
+with aba4:
+  st.subheader("Cadastrar Novo Banco/Cartão")
+  novo_banco = st.text_input("Nome do Banco ou Cartão").strip()
+  if st.button("Adicionar Banco"):
+    if novo_banco:
+      try:
+        cursor.execute("INSERT INTO bancos (nome) VALUES (?)", (novo_banco,))
+        conn.commit()
+        st.success(f"Banco '{novo_banco}' adicionado com sucesso!")
+        st.rerun()
+      except sqlite3.IntegrityError:
+        st.warning("Este banco já está cadastrado.")
+    else:
+      st.error("Informe um nome válido.")
 
 bancos_df = pd.read_sql_query("SELECT id, nome FROM bancos", conn)
 
-# --- ABA 1: REGISTRAR GASTO ---
+# --- ABA: REGISTRAR GASTO ---
 with aba1:
-    if bancos_df.empty:
-        st.info(
-            "Nenhum banco cadastrado ainda. Vá na aba 'Gerenciar Bancos' para adicionar o primeiro."
+  if bancos_df.empty:
+    st.info(
+        "Nenhum banco cadastrado ainda. Vá na aba 'Bancos' para adicionar o"
+        " primeiro."
+    )
+  else:
+    st.subheader("Novo Lançamento")
+    with st.form("form_transacao", clear_on_submit=True):
+      col1, col2 = st.columns(2)
+      with col1:
+        banco_selecionado = st.selectbox(
+            "Selecione o Banco", options=bancos_df["nome"].tolist()
         )
-    else:
-        st.subheader("Novo Lançamento")
-        with st.form("form_transacao", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                banco_selecionado = st.selectbox(
-                    "Selecione o Banco",
-                    options=bancos_df["nome"].tolist(),
-                )
-                tipo = st.radio(
-                    "Tipo de Pagamento",
-                    ["Débito", "Crédito"],
-                    horizontal=True,
-                )
-            with col2:
-                valor = st.number_input(
-                    "Valor (R$)", min_value=0.01, format="%.2f"
-                )
-                data_gasto = st.date_input("Data", value=date.today())
+        tipo = st.radio(
+            "Tipo de Pagamento", ["Débito", "Crédito"], horizontal=True
+        )
+      with col2:
+        valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
+        data_gasto = st.date_input("Data", value=date.today())
 
-            descricao = st.text_input("Descrição (Opcional)")
-            submitted = st.form_submit_button("Registrar Gasto")
+      descricao = st.text_input("Descrição (Opcional)")
+      submitted = st.form_submit_button("Registrar Gasto")
 
-            if submitted:
-                banco_id = int(
-                    bancos_df[bancos_df["nome"] == banco_selecionado][
-                        "id"
-                    ].values[0]
-                )
-                cursor.execute(
-                    "INSERT INTO transacoes (data, banco_id, tipo, valor, descricao) VALUES (?, ?, ?, ?, ?)",
-                    (
-                        data_gasto.strftime("%Y-%m-%d"),
-                        banco_id,
-                        tipo,
-                        valor,
-                        descricao,
-                    ),
-                )
-                conn.commit()
-                st.success("Gasto registrado com sucesso!")
+      if submitted:
+        banco_id = int(
+            bancos_df[bancos_df["nome"] == banco_selecionado]["id"].values[0]
+        )
+        cursor.execute(
+            "INSERT INTO transacoes (data, banco_id, tipo, valor, descricao)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                data_gasto.strftime("%Y-%m-%d"),
+                banco_id,
+                tipo,
+                valor,
+                descricao,
+            ),
+        )
+        conn.commit()
+        st.success("Gasto registrado com sucesso!")
 
-    st.divider()
-    st.subheader("📊 Resumo do Dia")
-    data_filtro = st.date_input("Filtrar por data", value=date.today())
+  st.divider()
+  st.subheader("📊 Resumo do Dia")
+  data_filtro = st.date_input("Filtrar por data", value=date.today())
 
-    query_dia = """
+  query_dia = """
     SELECT t.id, t.data, b.nome AS banco, t.tipo, t.valor, t.descricao
     FROM transacoes t
     JOIN bancos b ON t.banco_id = b.id
     WHERE t.data = ?
+    ORDER BY t.id DESC
     """
-    df_dia = pd.read_sql_query(
-        query_dia, conn, params=(data_filtro.strftime("%Y-%m-%d"),)
+  df_dia = pd.read_sql_query(
+      query_dia, conn, params=(data_filtro.strftime("%Y-%m-%d"),)
+  )
+
+  if not df_dia.empty:
+    total_debito_dia = df_dia[df_dia["tipo"] == "Débito"]["valor"].sum()
+    total_credito_dia = df_dia[df_dia["tipo"] == "Crédito"]["valor"].sum()
+
+    col_deb, col_cred, col_tot = st.columns(3)
+    col_deb.metric("Total Débito", f"R$ {total_debito_dia:.2f}")
+    col_cred.metric("Total Crédito", f"R$ {total_credito_dia:.2f}")
+    col_tot.metric(
+        "Total do Dia", f"R$ {(total_debito_dia + total_credito_dia):.2f}"
     )
 
-    if not df_dia.empty:
-        total_debito_dia = df_dia[df_dia["tipo"] == "Débito"]["valor"].sum()
-        total_credito_dia = df_dia[df_dia["tipo"] == "Crédito"]["valor"].sum()
+    st.dataframe(
+        df_dia[["banco", "tipo", "valor", "descricao"]],
+        use_container_width=True,
+    )
 
-        col_deb, col_cred, col_tot = st.columns(3)
-        col_deb.metric("Total Débito", f"R$ {total_debito_dia:.2f}")
-        col_cred.metric("Total Crédito", f"R$ {total_credito_dia:.2f}")
-        col_tot.metric(
-            "Total do Dia", f"R$ {(total_debito_dia + total_credito_dia):.2f}"
-        )
+    # Exportar gastos do dia
+    csv_dia = df_dia.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📥 Exportar Gastos do Dia (CSV)",
+        data=csv_dia,
+        file_name=f"gastos_{data_filtro.strftime('%Y_%m_%d')}.csv",
+        mime="text/csv",
+    )
+  else:
+    st.info("Nenhum registro encontrado para esta data.")
 
-        st.dataframe(
-            df_dia[["banco", "tipo", "valor", "descricao"]],
-            use_container_width=True,
-        )
-    else:
-        st.info("Nenhum registro encontrado para esta data.")
-
-# --- ABA 2: RESUMO MENSAL ---
+# --- ABA: RESUMO MENSAL ---
 with aba2:
-    st.subheader("🗓️ Gastos do Mês")
+  st.subheader("🗓️ Gastos do Mês")
 
-    col_m, col_a = st.columns(2)
-    mes_atual = datetime.now().month
-    ano_atual = datetime.now().year
+  col_m, col_a = st.columns(2)
+  mes_atual = datetime.now().month
+  ano_atual = datetime.now().year
 
-    meses = [
-        "Janeiro",
-        "Fevereiro",
-        "Março",
-        "Abril",
-        "Maio",
-        "Junho",
-        "Julho",
-        "Agosto",
-        "Setembro",
-        "Outubro",
-        "Novembro",
-        "Dezembro",
-    ]
+  meses = [
+      "Janeiro",
+      "Fevereiro",
+      "Março",
+      "Abril",
+      "Maio",
+      "Junho",
+      "Julho",
+      "Agosto",
+      "Setembro",
+      "Outubro",
+      "Novembro",
+      "Dezembro",
+  ]
 
-    mes_nome = col_m.selectbox(
-        "Mês", meses, index=mes_atual - 1, key="select_mes"
-    )
-    mes_num = meses.index(mes_nome) + 1
-    ano_selecionado = col_a.number_input(
-        "Ano",
-        min_value=2020,
-        max_value=2100,
-        value=ano_atual,
-        key="select_ano",
-    )
+  mes_nome = col_m.selectbox(
+      "Mês", meses, index=mes_atual - 1, key="select_mes"
+  )
+  mes_num = meses.index(mes_nome) + 1
+  ano_selecionado = col_a.number_input(
+      "Ano",
+      min_value=2020,
+      max_value=2100,
+      value=ano_atual,
+      key="select_ano",
+  )
 
-    # Formatação do filtro de busca YYYY-MM
-    filtro_mes = f"{ano_selecionado:04d}-{mes_num:02d}"
+  filtro_mes = f"{ano_selecionado:04d}-{mes_num:02d}"
 
-    query_mes = """
-    SELECT t.data, b.nome AS banco, t.tipo, t.valor, t.descricao
+  query_mes = """
+    SELECT t.id, t.data, b.nome AS banco, t.tipo, t.valor, t.descricao
     FROM transacoes t
     JOIN bancos b ON t.banco_id = b.id
     WHERE strftime('%Y-%m', t.data) = ?
     ORDER BY t.data DESC
     """
-    df_mes = pd.read_sql_query(query_mes, conn, params=(filtro_mes,))
+  df_mes = pd.read_sql_query(query_mes, conn, params=(filtro_mes,))
 
-    if not df_mes.empty:
-        total_debito_mes = df_mes[df_mes["tipo"] == "Débito"]["valor"].sum()
-        total_credito_mes = df_mes[df_mes["tipo"] == "Crédito"]["valor"].sum()
-        total_geral_mes = total_debito_mes + total_credito_mes
+  if not df_mes.empty:
+    total_debito_mes = df_mes[df_mes["tipo"] == "Débito"]["valor"].sum()
+    total_credito_mes = df_mes[df_mes["tipo"] == "Crédito"]["valor"].sum()
+    total_geral_mes = total_debito_mes + total_credito_mes
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Débito no Mês", f"R$ {total_debito_mes:.2f}")
-        c2.metric("Total Crédito no Mês", f"R$ {total_credito_mes:.2f}")
-        c3.metric("Total Acumulado", f"R$ {total_geral_mes:.2f}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Débito no Mês", f"R$ {total_debito_mes:.2f}")
+    c2.metric("Total Crédito no Mês", f"R$ {total_credito_mes:.2f}")
+    c3.metric("Total Acumulado", f"R$ {total_geral_mes:.2f}")
 
-        st.markdown("#### Detalhamento por Banco no Mês")
-        resumo_banco = (
-            df_mes.groupby(["banco", "tipo"])["valor"].sum().unstack(fill_value=0)
-        )
+    st.markdown("#### Detalhamento por Banco no Mês")
+    resumo_banco = (
+        df_mes.groupby(["banco", "tipo"])["valor"].sum().unstack(fill_value=0)
+    )
 
-        for col in ["Débito", "Crédito"]:
-            if col not in resumo_banco.columns:
-                resumo_banco[col] = 0.0
+    for col in ["Débito", "Crédito"]:
+      if col not in resumo_banco.columns:
+        resumo_banco[col] = 0.0
 
-        resumo_banco["Total"] = resumo_banco["Débito"] + resumo_banco["Crédito"]
-        st.dataframe(
-            resumo_banco[["Débito", "Crédito", "Total"]].style.format(
-                "R$ {:.2f}"
-            ),
-            use_container_width=True,
-        )
+    resumo_banco["Total"] = resumo_banco["Débito"] + resumo_banco["Crédito"]
+    st.dataframe(
+        resumo_banco[["Débito", "Crédito", "Total"]].style.format("R$ {:.2f}"),
+        use_container_width=True,
+    )
 
-        st.markdown("#### Histórico do Mês")
-        st.dataframe(
-            df_mes[["data", "banco", "tipo", "valor", "descricao"]],
-            use_container_width=True,
-        )
-    else:
-        st.info(f"Nenhum lançamento encontrado para {mes_nome} de {ano_selecionado}.")
+    st.markdown("#### Histórico do Mês")
+    st.dataframe(
+        df_mes[["data", "banco", "tipo", "valor", "descricao"]],
+        use_container_width=True,
+    )
+
+    # Exportar gastos do mês
+    csv_mes = df_mes.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label=f"📥 Exportar Gastos de {mes_nome} (CSV)",
+        data=csv_mes,
+        file_name=f"gastos_{ano_selecionado}_{mes_num:02d}.csv",
+        mime="text/csv",
+    )
+  else:
+    st.info(
+        f"Nenhum lançamento encontrado para {mes_nome} de {ano_selecionado}."
+    )
+
+# --- ABA: GERENCIAR E APAGAR GASTOS ---
+with aba3:
+  st.subheader("🗑️ Apagar Registro de Gasto")
+
+  query_todos = """
+    SELECT t.id, t.data, b.nome AS banco, t.tipo, t.valor, t.descricao
+    FROM transacoes t
+    JOIN bancos b ON t.banco_id = b.id
+    ORDER BY t.data DESC, t.id DESC
+    LIMIT 50
+    """
+  df_todos = pd.read_sql_query(query_todos, conn)
+
+  if not df_todos.empty:
+    st.write("Selecione um lançamento recente para apagar:")
+
+    # Criar lista formatada para seleção fácil
+    opcoes = {
+        row[
+            "id"
+        ]: f"ID {row['id']} | {row['data']} | {row['banco']} | {row['tipo']} | R$ {row['valor']:.2f} ({row['descricao']})"
+        for _, row in df_todos.iterrows()
+    }
+
+    gasto_id_selecionado = st.selectbox(
+        "Selecione o registro:",
+        options=list(opcoes.keys()),
+        format_func=lambda x: opcoes[x],
+    )
+
+    if st.button("❌ Apagar Gasto Selecionado", type="primary"):
+      cursor.execute(
+          "DELETE FROM transacoes WHERE id = ?", (gasto_id_selecionado,)
+      )
+      conn.commit()
+      st.success("Gasto removido com sucesso!")
+      st.rerun()
+  else:
+    st.info("Nenhum gasto cadastrado para apagar.")
