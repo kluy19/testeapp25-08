@@ -2,3 +2,4 @@ PyGithub
 extra_streamlit_components
 pandas
 streamlit
+plotly
