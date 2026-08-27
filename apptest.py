@@ -473,7 +473,6 @@ with aba2:
       cred_banco = df_banco[df_banco["tipo"] == "Crédito"]["valor"].sum()
       tot_banco = deb_banco + cred_banco
 
-      # Container para atualizar em tempo real o valor do limite nas métricas
       metricas_container = st.container()
 
       st.markdown("---")
@@ -495,7 +494,7 @@ with aba2:
           key=f"limite_{nome_banco}",
       )
 
-      # Renderizando as Métricas do topo com o valor do Limite dinâmico
+      # Atualizando as Métricas do topo
       with metricas_container:
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
         col_b1.metric(f"Débito em {nome_banco}", f"R$ {deb_banco:.2f}")
@@ -505,13 +504,16 @@ with aba2:
         )
         col_b4.metric(f"Total Gasto ({nome_banco})", f"R$ {tot_banco:.2f}")
 
+      # Subtraindo o gasto no débito para obter o saldo restante em conta
+      saldo_restante_banco = max(0.0, saldo_banco_input - deb_banco)
+      # Subtraindo o gasto no crédito para obter o limite restante
       limite_livre_banco = max(0.0, limite_banco_input - cred_banco)
 
       col_gb1, col_gb2 = st.columns(2)
       with col_gb1:
         fig_deb_banco = criar_grafico_pizza(
-            [f"Saldo em {nome_banco}", "Gastos no Débito"],
-            [saldo_banco_input, deb_banco],
+            ["Saldo Restante Disponível", "Gastos no Débito"],
+            [saldo_restante_banco, deb_banco],
             ["#2ecc71", "#e67e22"],
             f"💵 Débito vs Saldo ({nome_banco})",
         )
