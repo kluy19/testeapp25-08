@@ -9,7 +9,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-st.set_page_config(page_title="Controle de Gastos Leve", page_icon="💳")
+st.set_page_config(
+    page_title="Controle de Gastos Leve", page_icon="💳", layout="wide"
+)
 
 # --- INTEGRAÇÃO COM GITHUB (PERSISTÊNCIA DE DADOS) ---
 DB_FILE = "gastos.db"
@@ -140,7 +142,7 @@ aba1, aba2, aba3, aba4 = st.tabs([
     "📝 Registrar Gasto",
     "📅 Resumo Mensal",
     "🗑️ Gerenciar/Apagar Gastos",
-    "🏦 Bancos",
+    "🏦 Cadastrar Bancos",
 ])
 
 # --- ABA: GERENCIAR BANCOS ---
@@ -208,8 +210,8 @@ bancos_df = pd.read_sql_query("SELECT id, nome FROM bancos", conn)
 with aba1:
   if bancos_df.empty:
     st.info(
-        "Nenhum banco cadastrado ainda. Vá na aba 'Bancos' para adicionar o"
-        " primeiro."
+        "Nenhum banco cadastrado ainda. Vá na aba 'Cadastrar Bancos' para"
+        " adicionar o primeiro."
     )
   else:
     st.subheader("Novo Lançamento")
@@ -281,9 +283,7 @@ with aba1:
         use_container_width=True,
     )
 
-    # BOTÕES DE EXPORTAÇÃO (CSV E XLSX)
     c_csv, c_xlsx = st.columns(2)
-
     csv_dia = df_dia.to_csv(index=False, sep=";", decimal=",").encode(
         "utf-8-sig"
     )
@@ -354,97 +354,99 @@ with aba2:
     """
   df_mes = pd.read_sql_query(query_mes, conn, params=(filtro_mes,))
 
-  total_debito_mes = (
-      df_mes[df_mes["tipo"] == "Débito"]["valor"].sum()
-      if not df_mes.empty
-      else 0.0
-  )
-  total_credito_mes = (
-      df_mes[df_mes["tipo"] == "Crédito"]["valor"].sum()
-      if not df_mes.empty
-      else 0.0
-  )
-  total_geral_mes = total_debito_mes + total_credito_mes
-
-  # --- GRÁFICOS SEPARADOS DE DÉBITO E CRÉDITO ---
-  st.subheader("💰 Visão de Patrimônio e Limites")
-
-  col_lim1, col_lim2 = st.columns(2)
-  saldo_conta = col_lim1.number_input(
-      "Dinheiro Total em Conta (R$)", min_value=0.0, value=1000.0, step=100.0
-  )
-  limite_total = col_lim2.number_input(
-      "Limite Total de Crédito (R$)", min_value=0.0, value=3000.0, step=100.0
-  )
-
-  limite_restante = max(0.0, limite_total - total_credito_mes)
-
-  col_g_deb, col_g_cred = st.columns(2)
-
-  with col_g_deb:
-    # GRÁFICO 1: DÉBITO X SALDO EM CONTA
-    labels_deb = ["Dinheiro Disponível na Conta", "Gastos no Débito (Mês)"]
-    valores_deb = [saldo_conta, total_debito_mes]
-
-    fig_debito = go.Figure(
-        data=[
-            go.Pie(
-                labels=labels_deb,
-                values=valores_deb,
-                pull=[0.05, 0.05],
-                textinfo="value+percent",
-                texttemplate="R$ %{value:.2f}<br>(%{percent})",
-                hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:.2f}<br>Porcentagem: %{percent}<extra></extra>",
-                marker=dict(colors=["#2ecc71", "#e67e22"]),
-            )
-        ]
-    )
-    fig_debito.update_layout(title_text="💵 Débito vs Saldo em Conta", height=380)
-    st.plotly_chart(fig_debito, use_container_width=True)
-
-  with col_g_cred:
-    # GRÁFICO 2: CRÉDITO X LIMITE
-    labels_cred = ["Limite Utilizado (Fatura)", "Limite Livre Restante"]
-    valores_cred = [total_credito_mes, limite_restante]
-
-    fig_credito = go.Figure(
-        data=[
-            go.Pie(
-                labels=labels_cred,
-                values=valores_cred,
-                pull=[0.05, 0.05],
-                textinfo="value+percent",
-                texttemplate="R$ %{value:.2f}<br>(%{percent})",
-                hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:.2f}<br>Porcentagem: %{percent}<extra></extra>",
-                marker=dict(colors=["#e74c3c", "#3498db"]),
-            )
-        ]
-    )
-    fig_credito.update_layout(
-        title_text="💳 Crédito vs Limite Disponível", height=380
-    )
-    st.plotly_chart(fig_credito, use_container_width=True)
-
-  st.markdown("---")
-
-  # --- SEPARAÇÃO POR BANCO E CONSOLIDADO ---
-  st.subheader("📊 Análise Detalhada de Gastos")
-
   lista_bancos = (
       bancos_df["nome"].tolist() if not bancos_df.empty else ["Sem Bancos"]
   )
-  abas_bancos = ["🌐 Consolidado (Todos os Bancos)"] + lista_bancos
+  abas_bancos = ["🌐 Consolidado Geral"] + lista_bancos
 
   tabs_dinamicas = st.tabs(abas_bancos)
 
+  # --- FUNÇÃO AUXILIAR PARA CRIAR OS GRÁFICOS SEM CORTAR NA IMAGEM ---
+  def criar_grafico_pizza(labels, valores, cores, titulo):
+    fig = go.Figure(
+        data=[
+            go.Pie(
+                labels=labels,
+                values=valores,
+                pull=[0.02, 0.02],
+                textinfo="value+percent",
+                texttemplate="R$ %{value:.2f}<br>(%{percent})",
+                hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:.2f}<br>Porcentagem: %{percent}<extra></extra>",
+                marker=dict(colors=cores),
+            )
+        ]
+    )
+    fig.update_layout(
+        title_text=titulo,
+        height=400,
+        margin=dict(l=40, r=40, t=50, b=40),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5
+        ),
+    )
+    return fig
+
   # --- ABA CONSOLIDADA (TODOS OS BANCOS) ---
   with tabs_dinamicas[0]:
+    total_debito_mes = (
+        df_mes[df_mes["tipo"] == "Débito"]["valor"].sum()
+        if not df_mes.empty
+        else 0.0
+    )
+    total_credito_mes = (
+        df_mes[df_mes["tipo"] == "Crédito"]["valor"].sum()
+        if not df_mes.empty
+        else 0.0
+    )
+    total_geral_mes = total_debito_mes + total_credito_mes
+
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Débito Geral", f"R$ {total_debito_mes:.2f}")
     c2.metric("Total Crédito Geral", f"R$ {total_credito_mes:.2f}")
     c3.metric("Total Geral do Mês", f"R$ {total_geral_mes:.2f}")
 
+    st.markdown("---")
+    st.subheader("💰 Visão Geral de Patrimonio e Limites")
+
+    col_lim1, col_lim2 = st.columns(2)
+    saldo_total_conta = col_lim1.number_input(
+        "Saldo Total em Contas (R$)",
+        min_value=0.0,
+        value=2300.0,
+        step=100.0,
+        key="saldo_cons",
+    )
+    limite_total_credito = col_lim2.number_input(
+        "Limite Total de Crédito (R$)",
+        min_value=0.0,
+        value=2000.0,
+        step=100.0,
+        key="limite_cons",
+    )
+
+    limite_restante_cons = max(0.0, limite_total_credito - total_credito_mes)
+
+    col_g_deb, col_g_cred = st.columns(2)
+    with col_g_deb:
+      fig_deb = criar_grafico_pizza(
+          ["Dinheiro Disponível na Conta", "Gastos no Débito (Mês)"],
+          [saldo_total_conta, total_debito_mes],
+          ["#2ecc71", "#e67e22"],
+          "💵 Débito vs Saldo Total",
+      )
+      st.plotly_chart(fig_deb, use_container_width=True)
+
+    with col_g_cred:
+      fig_cred = criar_grafico_pizza(
+          ["Limite Livre Restante", "Limite Utilizado (Fatura)"],
+          [limite_restante_cons, total_credito_mes],
+          ["#3498db", "#e74c3c"],
+          "💳 Crédito vs Limite Total",
+      )
+      st.plotly_chart(fig_cred, use_container_width=True)
+
     if not df_mes.empty:
+      st.markdown("---")
       cg1, cg2 = st.columns(2)
       with cg1:
         df_graf_banco = (
@@ -460,7 +462,9 @@ with aba2:
             labels={"valor": "Valor (R$)", "banco": "Banco", "tipo": "Tipo"},
             text_auto=".2f",
         )
-        fig_bar.update_layout(xaxis_title="", yaxis_title="R$")
+        fig_bar.update_layout(
+            xaxis_title="", yaxis_title="R$", margin=dict(l=40, r=40, t=50, b=40)
+        )
         st.plotly_chart(fig_bar, use_container_width=True)
 
       with cg2:
@@ -476,9 +480,10 @@ with aba2:
             textinfo="value+percent",
             texttemplate="R$ %{value:.2f}<br>(%{percent})",
         )
+        fig_pie.update_layout(margin=dict(l=40, r=40, t=50, b=40))
         st.plotly_chart(fig_pie, use_container_width=True)
 
-      st.markdown("#### Detalhamento de Todos os Bancos")
+      st.markdown("#### Detalhamento por Banco")
       resumo_banco = (
           df_mes.groupby(["banco", "tipo"])["valor"]
           .sum()
@@ -497,40 +502,68 @@ with aba2:
           use_container_width=True,
       )
 
-      st.markdown("#### Todos os Gastos Registrados no Mês")
-      st.dataframe(
-          df_mes[["data", "banco", "tipo", "valor", "descricao"]],
-          use_container_width=True,
-      )
-    else:
-      st.info("Nenhum lançamento no mês.")
-
-  # --- ABAS INDIVIDUAIS PARA CADA BANCO ---
+  # --- ABAS INDIVIDUAIS DE CADA BANCO ---
   for idx, nome_banco in enumerate(lista_bancos):
     with tabs_dinamicas[idx + 1]:
-      df_banco_especifico = df_mes[df_mes["banco"] == nome_banco]
+      df_banco = df_mes[df_mes["banco"] == nome_banco]
 
-      deb_banco = df_banco_especifico[df_banco_especifico["tipo"] == "Débito"][
-          "valor"
-      ].sum()
-      cred_banco = df_banco_especifico[
-          df_banco_especifico["tipo"] == "Crédito"
-      ]["valor"].sum()
+      deb_banco = df_banco[df_banco["tipo"] == "Débito"]["valor"].sum()
+      cred_banco = df_banco[df_banco["tipo"] == "Crédito"]["valor"].sum()
       tot_banco = deb_banco + cred_banco
 
       col_b1, col_b2, col_b3 = st.columns(3)
-      col_b1.metric(f"Débito ({nome_banco})", f"R$ {deb_banco:.2f}")
-      col_b2.metric(f"Crédito ({nome_banco})", f"R$ {cred_banco:.2f}")
+      col_b1.metric(f"Débito em {nome_banco}", f"R$ {deb_banco:.2f}")
+      col_b2.metric(f"Crédito em {nome_banco}", f"R$ {cred_banco:.2f}")
       col_b3.metric(f"Total Gasto ({nome_banco})", f"R$ {tot_banco:.2f}")
 
-      if not df_banco_especifico.empty:
-        st.markdown(f"#### Histórico Exclusivo: {nome_banco}")
+      st.markdown("---")
+      st.subheader(f"💰 Saldo e Limite: {nome_banco}")
+
+      col_lim_b1, col_lim_b2 = st.columns(2)
+      saldo_banco_input = col_lim_b1.number_input(
+          f"Saldo em Conta no {nome_banco} (R$)",
+          min_value=0.0,
+          value=1000.0,
+          step=100.0,
+          key=f"saldo_{nome_banco}",
+      )
+      limite_banco_input = col_lim_b2.number_input(
+          f"Limite do Cartão no {nome_banco} (R$)",
+          min_value=0.0,
+          value=1500.0,
+          step=100.0,
+          key=f"limite_{nome_banco}",
+      )
+
+      limite_livre_banco = max(0.0, limite_banco_input - cred_banco)
+
+      col_gb1, col_gb2 = st.columns(2)
+      with col_gb1:
+        fig_deb_banco = criar_grafico_pizza(
+            [f"Saldo em {nome_banco}", "Gastos no Débito"],
+            [saldo_banco_input, deb_banco],
+            ["#2ecc71", "#e67e22"],
+            f"💵 Débito vs Saldo ({nome_banco})",
+        )
+        st.plotly_chart(fig_deb_banco, use_container_width=True)
+
+      with col_gb2:
+        fig_cred_banco = criar_grafico_pizza(
+            ["Limite Livre Restante", "Limite Utilizado (Fatura)"],
+            [limite_livre_banco, cred_banco],
+            ["#3498db", "#e74c3c"],
+            f"💳 Crédito vs Limite ({nome_banco})",
+        )
+        st.plotly_chart(fig_cred_banco, use_container_width=True)
+
+      if not df_banco.empty:
+        st.markdown(f"#### Histórico de Lançamentos: {nome_banco}")
         st.dataframe(
-            df_banco_especifico[["data", "tipo", "valor", "descricao"]],
+            df_banco[["data", "tipo", "valor", "descricao"]],
             use_container_width=True,
         )
       else:
-        st.info(f"Sem gastos cadastrados no banco {nome_banco} para este mês.")
+        st.info(f"Nenhum lançamento no {nome_banco} para este mês.")
 
   st.markdown("---")
 
