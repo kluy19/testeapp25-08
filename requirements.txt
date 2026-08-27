@@ -3,4 +3,4 @@ extra_streamlit_components
 pandas
 streamlit
 plotly
-lxml
+openpyxl
