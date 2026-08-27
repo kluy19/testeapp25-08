@@ -5,6 +5,7 @@ import extra_streamlit_components as stx
 from github import Github
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 st.set_page_config(page_title="Controle de Gastos Leve", page_icon="💳")
@@ -15,7 +16,6 @@ DB_FILE = "gastos.db"
 
 @st.cache_resource
 def get_github_repo():
-  """Conecta à API do GitHub usando as credenciais salvas nos Secrets."""
   try:
     g = Github(st.secrets["GITHUB_TOKEN"])
     return g.get_repo(st.secrets["REPO_NAME"])
@@ -25,7 +25,6 @@ def get_github_repo():
 
 
 def baixar_banco_github():
-  """Garante que o banco de dados mais recente do GitHub esteja salvo localmente ao iniciar."""
   repo = get_github_repo()
   if repo and "db_baixado" not in st.session_state:
     try:
@@ -34,14 +33,12 @@ def baixar_banco_github():
         f.write(content.decoded_content)
       st.session_state["db_baixado"] = True
     except Exception:
-      # Se o arquivo ainda não existir no GitHub, ele será criado no primeiro commit
       pass
 
 
 def salvar_banco_github(
     mensagem_commit="Atualizando gastos.db via Streamlit",
 ):
-  """Envia a versão atualizada do gastos.db para o repositório no GitHub."""
   repo = get_github_repo()
   if not repo:
     return
@@ -64,11 +61,10 @@ def salvar_banco_github(
       )
 
 
-# Baixar a versão mais atual do banco ao carregar o app
 baixar_banco_github()
 
 # --- CONFIGURAÇÃO DE SEGURANÇA E COOKIE ---
-SENHA_CORRETA = "suasenha123"  # Mude para a sua senha desejada
+SENHA_CORRETA = "suasenha123"
 
 
 def get_cookie_manager():
@@ -165,7 +161,6 @@ with aba4:
 
   st.divider()
 
-  # Seção para Excluir Banco
   st.subheader("🗑️ Excluir Banco/Cartão")
   bancos_df_excluir = pd.read_sql_query(
       "SELECT id, nome FROM bancos ORDER BY nome", conn
@@ -185,7 +180,6 @@ with aba4:
           ].values[0]
       )
 
-      # Verificar se o banco possui transações vinculadas
       cursor.execute(
           "SELECT COUNT(*) FROM transacoes WHERE banco_id = ?",
           (banco_id_excluir,),
@@ -286,15 +280,25 @@ with aba1:
         use_container_width=True,
     )
 
-    # Exportar gastos do dia formatado para o Excel
+    # BOTÕES DE EXPORTAÇÃO (CSV E XML)
+    c_csv, c_xml = st.columns(2)
+
     csv_dia = df_dia.to_csv(index=False, sep=";", decimal=",").encode(
         "utf-8-sig"
     )
-    st.download_button(
-        label="📥 Exportar Gastos do Dia (CSV)",
+    c_csv.download_button(
+        label="📥 Exportar CSV (Excel)",
         data=csv_dia,
         file_name=f"gastos_{data_filtro.strftime('%Y_%m_%d')}.csv",
         mime="text/csv",
+    )
+
+    xml_dia = df_dia.to_xml(index=False, root_name="gastos", row_name="gasto")
+    c_xml.download_button(
+        label="📄 Exportar XML",
+        data=xml_dia,
+        file_name=f"gastos_{data_filtro.strftime('%Y_%m_%d')}.xml",
+        mime="application/xml",
     )
   else:
     st.info("Nenhum registro encontrado para esta data.")
@@ -345,23 +349,80 @@ with aba2:
     """
   df_mes = pd.read_sql_query(query_mes, conn, params=(filtro_mes,))
 
+  total_debito_mes = (
+      df_mes[df_mes["tipo"] == "Débito"]["valor"].sum()
+      if not df_mes.empty
+      else 0.0
+  )
+  total_credito_mes = (
+      df_mes[df_mes["tipo"] == "Crédito"]["valor"].sum()
+      if not df_mes.empty
+      else 0.0
+  )
+  total_geral_mes = total_debito_mes + total_credito_mes
+
+  c1, c2, c3 = st.columns(3)
+  c1.metric("Total Débito no Mês", f"R$ {total_debito_mes:.2f}")
+  c2.metric("Total Crédito no Mês", f"R$ {total_credito_mes:.2f}")
+  c3.metric("Total Acumulado", f"R$ {total_geral_mes:.2f}")
+
+  st.markdown("---")
+
+  # --- NOVO RECURSO: SIMULAÇÃO / GRÁFICO DE SALDOS E LIMITES ---
+  st.subheader("💰 Visão de Patrimônio e Limites")
+
+  col_lim1, col_lim2 = st.columns(2)
+  saldo_conta = col_lim1.number_input(
+      "Dinheiro Atual na Conta (R$)", min_value=0.0, value=1000.0, step=100.0
+  )
+  limite_total = col_lim2.number_input(
+      "Limite Total do Cartão de Crédito (R$)",
+      min_value=0.0,
+      value=3000.0,
+      step=100.0,
+  )
+
+  limite_restante = max(0.0, limite_total - total_credito_mes)
+
+  # Dados para o gráfico com fatias separadas
+  labels_pat = [
+      "Dinheiro em Conta",
+      "Limite de Crédito Utilizado",
+      "Limite Livre Restante",
+  ]
+  valores_pat = [saldo_conta, total_credito_mes, limite_restante]
+
+  # Criando gráfico com fatias separadas (pull) e valor + porcentagem no texto
+  fig_patrimonio = go.Figure(
+      data=[
+          go.Pie(
+              labels=labels_pat,
+              values=valores_pat,
+              pull=[
+                  0.05,
+                  0.05,
+                  0.05,
+              ],  # Afasta levemente cada fatia da outra
+              textinfo="value+percent",  # Exibe o R$ e a % na fatia
+              texttemplate="R$ %{value:.2f}<br>(%{percent})",
+              hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:.2f}<br>Porcentagem: %{percent}<extra></extra>",
+              marker=dict(colors=["#2ecc71", "#e74c3c", "#3498db"]),
+          )
+      ]
+  )
+  fig_patrimonio.update_layout(
+      title_text="Distribuição de Caixa vs Limite de Crédito", height=400
+  )
+  st.plotly_chart(fig_patrimonio, use_container_width=True)
+
+  st.markdown("---")
+
   if not df_mes.empty:
-    total_debito_mes = df_mes[df_mes["tipo"] == "Débito"]["valor"].sum()
-    total_credito_mes = df_mes[df_mes["tipo"] == "Crédito"]["valor"].sum()
-    total_geral_mes = total_debito_mes + total_credito_mes
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Débito no Mês", f"R$ {total_debito_mes:.2f}")
-    c2.metric("Total Crédito no Mês", f"R$ {total_credito_mes:.2f}")
-    c3.metric("Total Acumulado", f"R$ {total_geral_mes:.2f}")
-
-    st.markdown("---")
-    st.subheader("📈 Análise Gráfica")
+    st.subheader("📈 Análise Gráfica dos Gastos")
 
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
-      # Gráfico 1: Barras Comparativas por Banco e Tipo
       df_graf_banco = (
           df_mes.groupby(["banco", "tipo"])["valor"].sum().reset_index()
       )
@@ -379,16 +440,17 @@ with aba2:
       st.plotly_chart(fig_bar, use_container_width=True)
 
     with col_g2:
-      # Gráfico 2: Distribuição Geral por Banco (Rosca)
       df_graf_pizza = df_mes.groupby("banco")["valor"].sum().reset_index()
       fig_pie = px.pie(
           df_graf_pizza,
           values="valor",
           names="banco",
           title="Participação de Cada Banco no Mês",
-          hole=0.4,
+          hole=0.3,
       )
-      fig_pie.update_traces(textinfo="percent+label")
+      fig_pie.update_traces(
+          textinfo="value+percent", texttemplate="R$ %{value:.2f}<br>(%{percent})"
+      )
       st.plotly_chart(fig_pie, use_container_width=True)
 
     st.markdown("---")
@@ -413,15 +475,25 @@ with aba2:
         use_container_width=True,
     )
 
-    # Exportar gastos do mês formatado para o Excel
+    # BOTÕES DE EXPORTAÇÃO DO MÊS (CSV E XML)
+    c_csv_m, c_xml_m = st.columns(2)
+
     csv_mes = df_mes.to_csv(index=False, sep=";", decimal=",").encode(
         "utf-8-sig"
     )
-    st.download_button(
-        label=f"📥 Exportar Gastos de {mes_nome} (CSV)",
+    c_csv_m.download_button(
+        label=f"📥 Exportar {mes_nome} (CSV)",
         data=csv_mes,
         file_name=f"gastos_{ano_selecionado}_{mes_num:02d}.csv",
         mime="text/csv",
+    )
+
+    xml_mes = df_mes.to_xml(index=False, root_name="gastos", row_name="gasto")
+    c_xml_m.download_button(
+        label=f"📄 Exportar {mes_nome} (XML)",
+        data=xml_mes,
+        file_name=f"gastos_{ano_selecionado}_{mes_num:02d}.xml",
+        mime="application/xml",
     )
   else:
     st.info(
