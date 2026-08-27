@@ -1,10 +1,70 @@
+import os
 import sqlite3
 from datetime import date, datetime
 import extra_streamlit_components as stx
+from github import Github
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Controle de Gastos Leve", page_icon="💳")
+
+# --- INTEGRAÇÃO COM GITHUB (PERSISTÊNCIA DE DADOS) ---
+DB_FILE = "gastos.db"
+
+
+@st.cache_resource
+def get_github_repo():
+  """Conecta à API do GitHub usando as credenciais salvas nos Secrets."""
+  try:
+    g = Github(st.secrets["GITHUB_TOKEN"])
+    return g.get_repo(st.secrets["REPO_NAME"])
+  except Exception as e:
+    st.error(f"Erro ao conectar com o GitHub: {e}")
+    return None
+
+
+def baixar_banco_github():
+  """Garante que o banco de dados mais recente do GitHub esteja salvo localmente ao iniciar."""
+  repo = get_github_repo()
+  if repo and "db_baixado" not in st.session_state:
+    try:
+      content = repo.get_contents(DB_FILE)
+      with open(DB_FILE, "wb") as f:
+        f.write(content.decoded_content)
+      st.session_state["db_baixado"] = True
+    except Exception:
+      # Se o arquivo ainda não existir no GitHub, ele será criado no primeiro commit
+      pass
+
+
+def salvar_banco_github(
+    mensagem_commit="Atualizando gastos.db via Streamlit",
+):
+  """Envia a versão atualizada do gastos.db para o repositório no GitHub."""
+  repo = get_github_repo()
+  if not repo:
+    return
+
+  if os.path.exists(DB_FILE):
+    with open(DB_FILE, "rb") as f:
+      conteudo_bytes = f.read()
+
+    try:
+      file_bytes = repo.get_contents(DB_FILE)
+      repo.update_file(
+          path=DB_FILE,
+          message=mensagem_commit,
+          content=conteudo_bytes,
+          sha=file_bytes.sha,
+      )
+    except Exception:
+      repo.create_file(
+          path=DB_FILE, message=mensagem_commit, content=conteudo_bytes
+      )
+
+
+# Baixar a versão mais atual do banco ao carregar o app
+baixar_banco_github()
 
 # --- CONFIGURAÇÃO DE SEGURANÇA E COOKIE ---
 SENHA_CORRETA = "suasenha123"  # Mude para a sua senha desejada
@@ -17,7 +77,7 @@ def get_cookie_manager():
 cookie_manager = get_cookie_manager()
 
 # --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS ---
-conn = sqlite3.connect("gastos.db", check_same_thread=False)
+conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -94,6 +154,7 @@ with aba4:
       try:
         cursor.execute("INSERT INTO bancos (nome) VALUES (?)", (novo_banco,))
         conn.commit()
+        salvar_banco_github(f"Adicionado banco: {novo_banco}")
         st.success(f"Banco '{novo_banco}' adicionado com sucesso!")
         st.rerun()
       except sqlite3.IntegrityError:
@@ -144,7 +205,10 @@ with aba1:
             ),
         )
         conn.commit()
-        st.success("Gasto registrado com sucesso!")
+        salvar_banco_github(
+            f"Novo gasto registrado: R$ {valor:.2f} em {banco_selecionado}"
+        )
+        st.success("Gasto registrado e salvo com sucesso!")
 
   st.divider()
   st.subheader("📊 Resumo do Dia")
@@ -294,7 +358,6 @@ with aba3:
   if not df_todos.empty:
     st.write("Selecione um lançamento recente para apagar:")
 
-    # Criar lista formatada para seleção fácil
     opcoes = {
         row[
             "id"
@@ -313,7 +376,8 @@ with aba3:
           "DELETE FROM transacoes WHERE id = ?", (gasto_id_selecionado,)
       )
       conn.commit()
-      st.success("Gasto removido com sucesso!")
+      salvar_banco_github(f"Gasto ID {gasto_id_selecionado} removido")
+      st.success("Gasto removido e alterações salvas no GitHub!")
       st.rerun()
   else:
     st.info("Nenhum gasto cadastrado para apagar.")
