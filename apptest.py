@@ -287,7 +287,7 @@ with aba1:
         "utf-8-sig"
     )
     c_csv.download_button(
-        label="📥 Exportar CSV (Excel)",
+        label="📥 Exportar CSV (Dia)",
         data=csv_dia,
         file_name=f"gastos_{data_filtro.strftime('%Y_%m_%d')}.csv",
         mime="text/csv",
@@ -295,7 +295,7 @@ with aba1:
 
     xml_dia = df_dia.to_xml(index=False, root_name="gastos", row_name="gasto")
     c_xml.download_button(
-        label="📄 Exportar XML",
+        label="📄 Exportar XML (Dia)",
         data=xml_dia,
         file_name=f"gastos_{data_filtro.strftime('%Y_%m_%d')}.xml",
         mime="application/xml",
@@ -368,7 +368,7 @@ with aba2:
 
   st.markdown("---")
 
-  # --- NOVO RECURSO: SIMULAÇÃO / GRÁFICO DE SALDOS E LIMITES ---
+  # --- GRÁFICO DE SALDOS E LIMITES ---
   st.subheader("💰 Visão de Patrimônio e Limites")
 
   col_lim1, col_lim2 = st.columns(2)
@@ -384,7 +384,6 @@ with aba2:
 
   limite_restante = max(0.0, limite_total - total_credito_mes)
 
-  # Dados para o gráfico com fatias separadas
   labels_pat = [
       "Dinheiro em Conta",
       "Limite de Crédito Utilizado",
@@ -392,18 +391,13 @@ with aba2:
   ]
   valores_pat = [saldo_conta, total_credito_mes, limite_restante]
 
-  # Criando gráfico com fatias separadas (pull) e valor + porcentagem no texto
   fig_patrimonio = go.Figure(
       data=[
           go.Pie(
               labels=labels_pat,
               values=valores_pat,
-              pull=[
-                  0.05,
-                  0.05,
-                  0.05,
-              ],  # Afasta levemente cada fatia da outra
-              textinfo="value+percent",  # Exibe o R$ e a % na fatia
+              pull=[0.05, 0.05, 0.05],
+              textinfo="value+percent",
               texttemplate="R$ %{value:.2f}<br>(%{percent})",
               hovertemplate="<b>%{label}</b><br>Valor: R$ %{value:.2f}<br>Porcentagem: %{percent}<extra></extra>",
               marker=dict(colors=["#2ecc71", "#e74c3c", "#3498db"]),
