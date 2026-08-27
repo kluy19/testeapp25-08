@@ -4,6 +4,7 @@ from datetime import date, datetime
 import extra_streamlit_components as stx
 from github import Github
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 st.set_page_config(page_title="Controle de Gastos Leve", page_icon="💳")
@@ -162,6 +163,50 @@ with aba4:
     else:
       st.error("Informe um nome válido.")
 
+  st.divider()
+
+  # Seção para Excluir Banco
+  st.subheader("🗑️ Excluir Banco/Cartão")
+  bancos_df_excluir = pd.read_sql_query(
+      "SELECT id, nome FROM bancos ORDER BY nome", conn
+  )
+
+  if not bancos_df_excluir.empty:
+    banco_excluir_nome = st.selectbox(
+        "Selecione o banco que deseja remover:",
+        options=bancos_df_excluir["nome"].tolist(),
+        key="select_banco_excluir",
+    )
+
+    if st.button("❌ Remover Banco Selecionado", type="primary"):
+      banco_id_excluir = int(
+          bancos_df_excluir[bancos_df_excluir["nome"] == banco_excluir_nome][
+              "id"
+          ].values[0]
+      )
+
+      # Verificar se o banco possui transações vinculadas
+      cursor.execute(
+          "SELECT COUNT(*) FROM transacoes WHERE banco_id = ?",
+          (banco_id_excluir,),
+      )
+      qtd_transacoes = cursor.fetchone()[0]
+
+      if qtd_transacoes > 0:
+        st.error(
+            f"Não é possível apagar o banco '{banco_excluir_nome}' pois existem"
+            f" {qtd_transacoes} gasto(s) vinculados a ele. Apague os gastos"
+            " primeiro!"
+        )
+      else:
+        cursor.execute("DELETE FROM bancos WHERE id = ?", (banco_id_excluir,))
+        conn.commit()
+        salvar_banco_github(f"Banco removido: {banco_excluir_nome}")
+        st.success(f"Banco '{banco_excluir_nome}' removido com sucesso!")
+        st.rerun()
+  else:
+    st.info("Nenhum banco cadastrado no momento.")
+
 bancos_df = pd.read_sql_query("SELECT id, nome FROM bancos", conn)
 
 # --- ABA: REGISTRAR GASTO ---
@@ -241,8 +286,10 @@ with aba1:
         use_container_width=True,
     )
 
-    # Exportar gastos do dia
-    csv_dia = df_dia.to_csv(index=False).encode("utf-8")
+    # Exportar gastos do dia formatado para o Excel
+    csv_dia = df_dia.to_csv(index=False, sep=";", decimal=",").encode(
+        "utf-8-sig"
+    )
     st.download_button(
         label="📥 Exportar Gastos do Dia (CSV)",
         data=csv_dia,
@@ -308,6 +355,43 @@ with aba2:
     c2.metric("Total Crédito no Mês", f"R$ {total_credito_mes:.2f}")
     c3.metric("Total Acumulado", f"R$ {total_geral_mes:.2f}")
 
+    st.markdown("---")
+    st.subheader("📈 Análise Gráfica")
+
+    col_g1, col_g2 = st.columns(2)
+
+    with col_g1:
+      # Gráfico 1: Barras Comparativas por Banco e Tipo
+      df_graf_banco = (
+          df_mes.groupby(["banco", "tipo"])["valor"].sum().reset_index()
+      )
+      fig_bar = px.bar(
+          df_graf_banco,
+          x="banco",
+          y="valor",
+          color="tipo",
+          barmode="group",
+          title="Gastos por Banco (Débito vs Crédito)",
+          labels={"valor": "Valor (R$)", "banco": "Banco", "tipo": "Tipo"},
+          text_auto=".2f",
+      )
+      fig_bar.update_layout(xaxis_title="", yaxis_title="R$")
+      st.plotly_chart(fig_bar, use_container_width=True)
+
+    with col_g2:
+      # Gráfico 2: Distribuição Geral por Banco (Rosca)
+      df_graf_pizza = df_mes.groupby("banco")["valor"].sum().reset_index()
+      fig_pie = px.pie(
+          df_graf_pizza,
+          values="valor",
+          names="banco",
+          title="Participação de Cada Banco no Mês",
+          hole=0.4,
+      )
+      fig_pie.update_traces(textinfo="percent+label")
+      st.plotly_chart(fig_pie, use_container_width=True)
+
+    st.markdown("---")
     st.markdown("#### Detalhamento por Banco no Mês")
     resumo_banco = (
         df_mes.groupby(["banco", "tipo"])["valor"].sum().unstack(fill_value=0)
@@ -329,8 +413,10 @@ with aba2:
         use_container_width=True,
     )
 
-    # Exportar gastos do mês
-    csv_mes = df_mes.to_csv(index=False).encode("utf-8")
+    # Exportar gastos do mês formatado para o Excel
+    csv_mes = df_mes.to_csv(index=False, sep=";", decimal=",").encode(
+        "utf-8-sig"
+    )
     st.download_button(
         label=f"📥 Exportar Gastos de {mes_nome} (CSV)",
         data=csv_mes,
