@@ -1,3 +1,4 @@
+import io
 import os
 import sqlite3
 from datetime import date, datetime
@@ -280,8 +281,8 @@ with aba1:
         use_container_width=True,
     )
 
-    # BOTÕES DE EXPORTAÇÃO (CSV E XML)
-    c_csv, c_xml = st.columns(2)
+    # BOTÕES DE EXPORTAÇÃO (CSV E XLSX)
+    c_csv, c_xlsx = st.columns(2)
 
     csv_dia = df_dia.to_csv(index=False, sep=";", decimal=",").encode(
         "utf-8-sig"
@@ -293,12 +294,16 @@ with aba1:
         mime="text/csv",
     )
 
-    xml_dia = df_dia.to_xml(index=False, root_name="gastos", row_name="gasto")
-    c_xml.download_button(
-        label="📄 Exportar XML (Dia)",
-        data=xml_dia,
-        file_name=f"gastos_{data_filtro.strftime('%Y_%m_%d')}.xml",
-        mime="application/xml",
+    buffer_dia = io.BytesIO()
+    with pd.ExcelWriter(buffer_dia, engine="openpyxl") as writer:
+      df_dia.to_excel(writer, index=False, sheet_name="Gastos_Dia")
+    xlsx_dia = buffer_dia.getvalue()
+
+    c_xlsx.download_button(
+        label="📊 Exportar XLSX (Excel)",
+        data=xlsx_dia,
+        file_name=f"gastos_{data_filtro.strftime('%Y_%m_%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
   else:
     st.info("Nenhum registro encontrado para esta data.")
@@ -469,8 +474,8 @@ with aba2:
         use_container_width=True,
     )
 
-    # BOTÕES DE EXPORTAÇÃO DO MÊS (CSV E XML)
-    c_csv_m, c_xml_m = st.columns(2)
+    # BOTÕES DE EXPORTAÇÃO DO MÊS (CSV E XLSX)
+    c_csv_m, c_xlsx_m = st.columns(2)
 
     csv_mes = df_mes.to_csv(index=False, sep=";", decimal=",").encode(
         "utf-8-sig"
@@ -482,12 +487,16 @@ with aba2:
         mime="text/csv",
     )
 
-    xml_mes = df_mes.to_xml(index=False, root_name="gastos", row_name="gasto")
-    c_xml_m.download_button(
-        label=f"📄 Exportar {mes_nome} (XML)",
-        data=xml_mes,
-        file_name=f"gastos_{ano_selecionado}_{mes_num:02d}.xml",
-        mime="application/xml",
+    buffer_mes = io.BytesIO()
+    with pd.ExcelWriter(buffer_mes, engine="openpyxl") as writer:
+      df_mes.to_excel(writer, index=False, sheet_name=f"Gastos_{mes_nome}")
+    xlsx_mes = buffer_mes.getvalue()
+
+    c_xlsx_m.download_button(
+        label=f"📊 Exportar {mes_nome} (XLSX)",
+        data=xlsx_mes,
+        file_name=f"gastos_{ano_selecionado}_{mes_num:02d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
   else:
     st.info(
