@@ -482,7 +482,7 @@ with aba2:
       saldo_banco_input = col_lim_b1.number_input(
           f"Saldo em Conta no {nome_banco} (R$)",
           min_value=0.0,
-          value=0.0,
+          value=1000.0,
           step=100.0,
           key=f"saldo_{nome_banco}",
       )
