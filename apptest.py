@@ -361,7 +361,7 @@ with aba2:
 
   tabs_dinamicas = st.tabs(abas_bancos)
 
-  # --- FUNÇÃO AUXILIAR PARA CRIAR OS GRÁFICOS SEM CORTAR NA IMAGEM ---
+  # --- FUNÇÃO AUXILIAR PARA CRIAR OS GRÁFICOS PIZZA ---
   def criar_grafico_pizza(labels, valores, cores, titulo):
     fig = go.Figure(
         data=[
@@ -404,46 +404,6 @@ with aba2:
     c1.metric("Total Débito Geral", f"R$ {total_debito_mes:.2f}")
     c2.metric("Total Crédito Geral", f"R$ {total_credito_mes:.2f}")
     c3.metric("Total Geral do Mês", f"R$ {total_geral_mes:.2f}")
-
-    st.markdown("---")
-    st.subheader("💰 Visão Geral de Patrimonio e Limites")
-
-    col_lim1, col_lim2 = st.columns(2)
-    saldo_total_conta = col_lim1.number_input(
-        "Saldo Total em Contas (R$)",
-        min_value=0.0,
-        value=2300.0,
-        step=100.0,
-        key="saldo_cons",
-    )
-    limite_total_credito = col_lim2.number_input(
-        "Limite Total de Crédito (R$)",
-        min_value=0.0,
-        value=2000.0,
-        step=100.0,
-        key="limite_cons",
-    )
-
-    limite_restante_cons = max(0.0, limite_total_credito - total_credito_mes)
-
-    col_g_deb, col_g_cred = st.columns(2)
-    with col_g_deb:
-      fig_deb = criar_grafico_pizza(
-          ["Dinheiro Disponível na Conta", "Gastos no Débito (Mês)"],
-          [saldo_total_conta, total_debito_mes],
-          ["#2ecc71", "#e67e22"],
-          "💵 Débito vs Saldo Total",
-      )
-      st.plotly_chart(fig_deb, use_container_width=True)
-
-    with col_g_cred:
-      fig_cred = criar_grafico_pizza(
-          ["Limite Livre Restante", "Limite Utilizado (Fatura)"],
-          [limite_restante_cons, total_credito_mes],
-          ["#3498db", "#e74c3c"],
-          "💳 Crédito vs Limite Total",
-      )
-      st.plotly_chart(fig_cred, use_container_width=True)
 
     if not df_mes.empty:
       st.markdown("---")
@@ -501,6 +461,8 @@ with aba2:
           ),
           use_container_width=True,
       )
+    else:
+      st.info("Nenhum gasto cadastrado no mês.")
 
   # --- ABAS INDIVIDUAIS DE CADA BANCO ---
   for idx, nome_banco in enumerate(lista_bancos):
@@ -511,10 +473,8 @@ with aba2:
       cred_banco = df_banco[df_banco["tipo"] == "Crédito"]["valor"].sum()
       tot_banco = deb_banco + cred_banco
 
-      col_b1, col_b2, col_b3 = st.columns(3)
-      col_b1.metric(f"Débito em {nome_banco}", f"R$ {deb_banco:.2f}")
-      col_b2.metric(f"Crédito em {nome_banco}", f"R$ {cred_banco:.2f}")
-      col_b3.metric(f"Total Gasto ({nome_banco})", f"R$ {tot_banco:.2f}")
+      # Container para atualizar em tempo real o valor do limite nas métricas
+      metricas_container = st.container()
 
       st.markdown("---")
       st.subheader(f"💰 Saldo e Limite: {nome_banco}")
@@ -523,17 +483,27 @@ with aba2:
       saldo_banco_input = col_lim_b1.number_input(
           f"Saldo em Conta no {nome_banco} (R$)",
           min_value=0.0,
-          value=1000.0,
+          value=0.0,
           step=100.0,
           key=f"saldo_{nome_banco}",
       )
       limite_banco_input = col_lim_b2.number_input(
           f"Limite do Cartão no {nome_banco} (R$)",
           min_value=0.0,
-          value=1500.0,
+          value=2000.0,
           step=100.0,
           key=f"limite_{nome_banco}",
       )
+
+      # Renderizando as Métricas do topo com o valor do Limite dinâmico
+      with metricas_container:
+        col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+        col_b1.metric(f"Débito em {nome_banco}", f"R$ {deb_banco:.2f}")
+        col_b2.metric(f"Crédito em {nome_banco}", f"R$ {cred_banco:.2f}")
+        col_b3.metric(
+            f"Limite Cartão ({nome_banco})", f"R$ {limite_banco_input:.2f}"
+        )
+        col_b4.metric(f"Total Gasto ({nome_banco})", f"R$ {tot_banco:.2f}")
 
       limite_livre_banco = max(0.0, limite_banco_input - cred_banco)
 
